@@ -93,7 +93,7 @@ In Nomad Drive your character comes from a round-robin by join order: the first 
 
 1. Join or start a game, press **Esc** to open the pause menu.
 2. Click **Wardrobe** (right below Settings).
-3. Choose an **Outfit** (the game's presets, or your own *My look 1-3*), or save the current mix with **Save current look**. Or or use the `<` `>` arrows for each part and switch accessories **On/Off**. The character on the right shows the result: drag on it to turn the camera, scroll to zoom.
+3. Choose an **Outfit** (the game's presets, or your own *My look 1-3*), or save the current mix with **Save current look**. Use the `<` `>` arrows for each part and switch accessories **On/Off**. The character on the right shows the result: drag on it to turn the camera, scroll to zoom.
 4. Click **Close**. Your look is saved and used next time automatically.
 
 To go back to the game's default outfit, set `HasSavedLook` to `false` in the config. If the native panel cannot be built (for example after a game update), the mod falls back to a simple on-screen window.
