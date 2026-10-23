@@ -24,7 +24,7 @@ namespace NomadDriveWardrobe
     {
         public const string Guid = "com.nunod87.nomaddrive.wardrobe";
         public const string Name = "Nomad Drive Wardrobe";
-        public const string Version = "0.1.0";
+        public const string Version = "0.2.0";
 
         internal static ManualLogSource Log;
         internal static Plugin Instance;
@@ -38,7 +38,9 @@ namespace NomadDriveWardrobe
         private readonly HashSet<string> _patched = new HashSet<string>();
 
         // Window state
-        private bool _open;
+        private bool _open;                 // simple IMGUI fallback window
+        private WardrobePanel _panel;        // native panel
+        private Component _pauseRoot;
         private GameObject _panelGo;
         private Rect _rect = new Rect(40, 60, 440, 640);
         private Vector2 _scroll;
@@ -125,7 +127,7 @@ namespace NomadDriveWardrobe
 
                 var clone = UnityEngine.Object.Instantiate(settings.gameObject, parent);
                 clone.name = "WardrobeButton";
-                clone.transform.SetSiblingIndex(settings.transform.GetSiblingIndex() + 1);
+                MakeRoom(settings, clone);
 
                 // Localization components would overwrite our label; strip them on the copy only.
                 foreach (var c in clone.GetComponentsInChildren<Component>(true))
@@ -135,7 +137,7 @@ namespace NomadDriveWardrobe
                     if (n.IndexOf("Locali", StringComparison.OrdinalIgnoreCase) >= 0) UnityEngine.Object.Destroy(c);
                 }
 
-                Instance.StartCoroutine(FinishButton(clone, panel.gameObject));
+                Instance.StartCoroutine(ConfigureButton(clone, "Wardrobe", () => Instance.Toggle(panel.gameObject, panel)));
             }
             catch (Exception e)
             {
@@ -143,7 +145,41 @@ namespace NomadDriveWardrobe
             }
         }
 
-        private static IEnumerator FinishButton(GameObject clone, GameObject panelGo)
+        // The pause menu lays its buttons out by hand. Open a gap right below Settings for ours.
+        private static void MakeRoom(Component settings, GameObject clone)
+        {
+            var sRect = (RectTransform)settings.transform;
+            var cRect = (RectTransform)clone.transform;
+            var parent = sRect.parent;
+
+            var layoutType = AccessTools.TypeByName("UnityEngine.UI.LayoutGroup");
+            bool auto = layoutType != null && parent.GetComponent(layoutType) != null;
+            clone.transform.SetSiblingIndex(settings.transform.GetSiblingIndex() + 1);
+
+            var sb = new System.Text.StringBuilder("Pause menu buttons:");
+            foreach (Transform t in parent)
+            {
+                var r = t as RectTransform;
+                if (r != null) sb.Append(' ').Append(r.name).Append('@').Append(Mathf.RoundToInt(r.anchoredPosition.y));
+            }
+            Log.LogInfo(sb + (auto ? " (layout group: automatic)" : ""));
+            if (auto) return;
+
+            float sx = sRect.anchoredPosition.x, sy = sRect.anchoredPosition.y;
+            var below = new List<RectTransform>();
+            foreach (Transform t in parent)
+            {
+                var r = t as RectTransform;
+                if (r == null || r == cRect || r == sRect || !r.gameObject.activeSelf) continue;
+                if (r.anchoredPosition.y < sy - 1f && Mathf.Abs(r.anchoredPosition.x - sx) < Mathf.Max(50f, sRect.rect.width)) below.Add(r);
+            }
+
+            float pitch = below.Count > 0 ? sy - below.Max(r => r.anchoredPosition.y) : sRect.rect.height + 12f;
+            foreach (var r in below) r.anchoredPosition += new Vector2(0f, -pitch);
+            cRect.anchoredPosition = new Vector2(sx, sy - pitch);
+        }
+
+        internal static IEnumerator ConfigureButton(GameObject clone, string label, Action onClick)
         {
             yield return null; // let the destroyed localization components go first
             if (clone == null) yield break;
@@ -151,35 +187,53 @@ namespace NomadDriveWardrobe
             try
             {
                 var tmp = AccessTools.TypeByName("TMPro.TMP_Text");
-                var label = tmp != null ? clone.GetComponentInChildren(tmp, true) : null;
-                if (label != null) AccessTools.Property(tmp, "text")?.SetValue(label, "Wardrobe", null);
+                var text = tmp != null ? clone.GetComponentInChildren(tmp, true) : null;
+                if (text != null) AccessTools.Property(tmp, "text")?.SetValue(text, label, null);
 
                 var btnType = AccessTools.TypeByName("UnityEngine.UI.Button");
                 var btn = btnType != null ? clone.GetComponent(btnType) : null;
-                var onClick = btn != null ? AccessTools.Property(btnType, "onClick")?.GetValue(btn, null) as UnityEvent : null;
-                if (onClick == null) { Log.LogWarning("Could not wire the Wardrobe button (Button.onClick not found)."); yield break; }
+                var ev = btn != null ? AccessTools.Property(btnType, "onClick")?.GetValue(btn, null) as UnityEvent : null;
+                if (ev == null) { Log.LogWarning("Could not wire the button '" + label + "' (Button.onClick not found)."); yield break; }
 
-                onClick.RemoveAllListeners();
-                onClick.AddListener(() => Instance.Toggle(panelGo));
-                Log.LogInfo("Wardrobe button added to the pause menu.");
+                ev.RemoveAllListeners();
+                ev.AddListener(() => onClick());
+                Log.LogInfo("Button '" + label + "' ready.");
             }
             catch (Exception e)
             {
-                Log.LogError("FinishButton: " + e);
+                Log.LogError("ConfigureButton: " + e);
             }
         }
 
-        private void Toggle(GameObject panelGo)
+        private void Toggle(GameObject panelGo, Component pauseRoot)
         {
+            if (_open || (_panel != null && _panel.IsOpen)) { CloseWardrobe(); return; }
+
             _panelGo = panelGo;
-            _open = !_open;
-            if (_open) _manager = Cosmetics.FindLocal();
+            _pauseRoot = pauseRoot;
+            _manager = Cosmetics.FindLocal();
+            if (_manager == null) { Log.LogWarning("Wardrobe: no local player found."); return; }
+
+            _panel = WardrobePanel.TryOpen(pauseRoot, _manager);
+            if (_panel == null) _open = true; // fall back to the simple window
+        }
+
+        internal void CloseWardrobe()
+        {
+            if (_panel != null) { _panel.Close(); _panel = null; }
+            _open = false;
         }
 
         // ---- Auto-apply the saved look ---------------------------------------------------
 
         private void Update()
         {
+            if (_panel != null)
+            {
+                if (_panelGo == null || !_panelGo.activeInHierarchy) CloseWardrobe();
+                else _panel.Tick(Time.unscaledDeltaTime);
+            }
+
             if (!_enabled.Value || !_autoApply.Value || !_saved.Value) return;
             if (Time.realtimeSinceStartup < _nextFind) return;
             _nextFind = Time.realtimeSinceStartup + 1f;
@@ -240,7 +294,7 @@ namespace NomadDriveWardrobe
             };
         }
 
-        private static void SaveLook(Component mgr)
+        internal static void SaveLook(Component mgr)
         {
             var look = Cosmetics.Capture(mgr);
             _feet.Value = look.Feet;
@@ -287,7 +341,7 @@ namespace NomadDriveWardrobe
                 GUILayout.Label("<b>Outfits</b>", RichLabel());
                 foreach (var s in sets)
                 {
-                    if (GUILayout.Button(string.IsNullOrEmpty(s.Name) ? "(unnamed)" : s.Name)) ApplySet(s);
+                    if (GUILayout.Button(Names.Outfit(s.Name))) ApplySet(s);
                 }
                 GUILayout.Space(8);
             }
@@ -360,7 +414,7 @@ namespace NomadDriveWardrobe
 
         private static string Pretty(string id)
         {
-            return id.Replace('_', ' ');
+            return Names.Single(id);
         }
 
         private static GUIStyle _rich;

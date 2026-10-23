@@ -51,13 +51,14 @@
 
 In Nomad Drive your character comes from a round-robin by join order: the first player to spawn gets outfit 1, the next outfit 2, and so on. There is no way to change it. This mod adds one.
 
-* A **Wardrobe** button in the pause menu opens an outfit picker.
-* Pick a whole **outfit**, or **mix and match** feet, legs, torso, head and accessories.
+* A **Wardrobe** button in the pause menu (below Settings) opens an outfit picker built from the game's own UI.
+* A **live preview** of your character turns beside the list, so you see what you pick.
+* Pick a whole **outfit**, or **mix and match** feet, legs, torso, head and accessories, with readable names ("Cowboy Hat", "Tank Top", ...).
 * Your choice is **saved** and re-applied every time you join a game.
 * **Everyone sees your look, and only you need the mod.** The mod uses the game's own networked cosmetic commands, so the server checks and syncs the choice like any normal change.
 * It uses only the outfits already in the game. No extra files, models or textures.
 
-> **Status: v0.x. Written from the game's code and not yet tested in game.** Please report anything odd.
+> **Status: v0.x. The v0.1 picker was tested in single player. The v0.2 native panel and preview are new and not yet tested in game.** Please report anything odd.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -92,10 +93,10 @@ In Nomad Drive your character comes from a round-robin by join order: the first 
 
 1. Join or start a game, press **Esc** to open the pause menu.
 2. Click **Wardrobe** (below Settings).
-3. Click an outfit, or use the `<` `>` arrows for each part, and tick accessories.
-4. Close the pause menu. Your look is saved and used next time automatically.
+3. Choose an **Outfit**, or use the `<` `>` arrows for each part and switch accessories **On/Off**. The character on the right shows the result.
+4. Click **Close**. Your look is saved and used next time automatically.
 
-The window can be dragged. To go back to the game's default outfit, press **Forget my saved look** in the window.
+To go back to the game's default outfit, set `HasSavedLook` to `false` in the config. If the native panel cannot be built (for example after a game update), the mod falls back to a simple on-screen window.
 
 The first time you open a game with the mod, the log (`BepInEx/LogOutput.log`, or `output_log.txt`) lists every outfit and part the game has, which is useful for bug reports.
 
@@ -117,7 +118,8 @@ Found by reading the game's assemblies:
 * `PlayerCosmeticManager` sits on every player. On the server it picks `availableSets[counter++ % count]` for each new player, which is why outfits depend on join order.
 * Each part (`Feet`, `LowerBody`, `UpperBody`, `Head`, up to 16 accessories) is a separate synced value. Every client shows the right parts from those values, including for players who join later.
 * The game already has `SetCosmetic`, `AddAccessory`, `RemoveAccessory` and `ApplySet`, which send commands to the server. The server validates the id against the character's real parts. Nothing in the game calls them, so there is no menu. This mod is that menu.
-* The pause menu button is a copy of the Settings button, added when the menu opens.
+* The pause menu button is a copy of the Settings button; the lower buttons move down to make room. The panel's rows are copies of the Settings screen's own option selectors, so they look and sound like the rest of the game.
+* The preview is a hidden camera that draws only your character into a texture. While the panel is open the character is moved to an unused layer (and unhidden if first-person hides it); everything is restored when you close it.
 
 Game types are reached through reflection, so this repository contains no game files.
 
@@ -125,8 +127,8 @@ Game types are reached through reflection, so this repository contains no game f
 
 ## Known Limits
 
-* The picker is a simple on-screen window (mouse). It is not a gamepad menu.
-* The window can sit over the pause menu buttons; drag it aside.
+* The preview uses the scene's lighting and a plain background, so it can look dark or flat in some places.
+* Thumbnails for every single part are not there yet; the preview shows your whole character.
 * Some parts may hide others (for example hats and hair); the game decides.
 * Playtest and release builds can differ. A game update can break the mod; it logs an error if it cannot find the expected types.
 
@@ -138,8 +140,11 @@ Game types are reached through reflection, so this repository contains no game f
 - [x] Mix and match parts and accessories
 - [x] Save and re-apply the look
 - [ ] Test in game (button placement, every part, late joiners)
-- [ ] Gamepad support and a native-looking panel
-- [ ] Look preview and several saved presets
+- [x] Native-looking panel from the game's own UI (v0.2)
+- [x] Live character preview (v0.2)
+- [ ] Thumbnail for every part
+- [ ] Gamepad navigation check
+- [ ] Several saved presets
 - [ ] Re-check against the 27 Oct 2026 release build
 
 See the [open issues](https://github.com/NunoD87/NomadDrive-Wardrobe/issues) for a full list of proposed features (and known issues).
