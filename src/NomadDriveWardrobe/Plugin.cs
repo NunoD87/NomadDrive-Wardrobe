@@ -24,7 +24,7 @@ namespace NomadDriveWardrobe
     {
         public const string Guid = "com.nunod87.nomaddrive.wardrobe";
         public const string Name = "Nomad Drive Wardrobe";
-        public const string Version = "0.3.0";
+        public const string Version = "0.3.1";
 
         internal static ManualLogSource Log;
         internal static Plugin Instance;
@@ -32,8 +32,6 @@ namespace NomadDriveWardrobe
         private static ConfigEntry<bool> _enabled;
         private static ConfigEntry<bool> _autoApply;
         private static ConfigEntry<string> _buttonPlacement;
-        internal const int SlotCount = 3;
-        private static readonly ConfigEntry<string>[] _slots = new ConfigEntry<string>[SlotCount];
         private static ConfigEntry<bool> _saved;
         private static ConfigEntry<string> _feet, _lower, _upper, _head, _accessories;
 
@@ -66,8 +64,7 @@ namespace NomadDriveWardrobe
             _buttonPlacement = Config.Bind("General", "ButtonPlacement", "Inline",
                 new ConfigDescription("Where the Wardrobe button goes in the pause menu: Inline (a new entry right below Settings; the list makes room) or Side (to the right of Settings).",
                     new AcceptableValueList<string>("Inline", "Side")));
-            for (int i = 0; i < SlotCount; i++)
-                _slots[i] = Config.Bind("My looks", "Slot" + (i + 1), "", "Saved look (written by the Wardrobe, no need to edit).");
+
             _saved = Config.Bind("Saved look", "HasSavedLook", false,
                 "Set by the mod when you pick something in the Wardrobe. Set to false to go back to the game's default outfit.");
             _feet = Config.Bind("Saved look", "Feet", "", "Cosmetic id (written by the Wardrobe).");
@@ -328,24 +325,6 @@ namespace NomadDriveWardrobe
                 Accessories = _accessories.Value.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
                     .Select(s => s.Trim()).Where(s => s.Length > 0).ToList(),
             };
-        }
-
-        internal static Cosmetics.Look GetSlot(int i)
-        {
-            var v = _slots[i].Value;
-            if (string.IsNullOrEmpty(v)) return null;
-            var parts = v.Split('|');
-            if (parts.Length != 5) return null;
-            return new Cosmetics.Look
-            {
-                Feet = parts[0], LowerBody = parts[1], UpperBody = parts[2], Head = parts[3],
-                Accessories = parts[4].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToList(),
-            };
-        }
-
-        internal static void SetSlot(int i, Cosmetics.Look l)
-        {
-            _slots[i].Value = string.Join("|", new[] { l.Feet, l.LowerBody, l.UpperBody, l.Head, string.Join(",", l.Accessories.ToArray()) });
         }
 
         internal static void SaveLook(Component mgr)

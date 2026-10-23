@@ -53,7 +53,7 @@ In Nomad Drive your character comes from a round-robin by join order: the first 
 
 * A **Wardrobe** button in the pause menu (a new entry below Settings, or to the side of it with `ButtonPlacement = Side`) opens an outfit picker built from the game's own UI.
 * A **live preview** of your character beside the list, so you see what you pick. Drag to turn the camera, scroll to zoom.
-* Pick a whole **outfit**, or **mix and match** feet, legs, torso, head and accessories, with readable names ("Cowboy Hat", "Tank Top", ...).
+* **Mix and match** feet, legs, torso, head and accessories, with readable names ("Cowboy Hat", "Tank Top", ...).
 * Your choice is **saved** and re-applied every time you join a game.
 * **Everyone sees your look, and only you need the mod.** The mod uses the game's own networked cosmetic commands, so the server checks and syncs the choice like any normal change.
 * It uses only the outfits already in the game. No extra files, models or textures.
@@ -93,7 +93,7 @@ In Nomad Drive your character comes from a round-robin by join order: the first 
 
 1. Join or start a game, press **Esc** to open the pause menu.
 2. Click **Wardrobe** (right below Settings).
-3. Choose an **Outfit** (the game's presets, or your own *My look 1-3*), or save the current mix with **Save current look**. Use the `<` `>` arrows for each part and switch accessories **On/Off**. The character on the right shows the result: drag on it to turn the camera, scroll to zoom.
+3. Use the `<` `>` arrows for each part and switch accessories **On/Off**. The character on the right shows the result: drag on it to turn the camera, scroll to zoom.
 4. Click **Close**. Your look is saved and used next time automatically.
 
 To go back to the game's default outfit, set `HasSavedLook` to `false` in the config. If the native panel cannot be built (for example after a game update), the mod falls back to a simple on-screen window.
@@ -106,7 +106,6 @@ The first time you open a game with the mod, the log (`BepInEx/LogOutput.log`, o
 |---|---|---|
 | `Enabled` | `true` | Switch the mod off without uninstalling |
 | `ButtonPlacement` | `Inline` | Pause menu button: `Inline` (a new entry below Settings) or `Side` (right of Settings) |
-| `Slot1`, `Slot2`, `Slot3` | empty | Your saved looks ("My look 1-3"). Written by the Wardrobe |
 | `AutoApply` | `true` | Re-apply the saved look when joining a game |
 | `HasSavedLook` | `false` | Set by the mod when you pick something; set to `false` to use the game's outfit again |
 | `Feet`, `LowerBody`, `UpperBody`, `Head`, `Accessories` | empty | Your saved parts. Written by the Wardrobe, no need to edit |
@@ -146,7 +145,7 @@ Game types are reached through reflection, so this repository contains no game f
 - [x] Live character preview (v0.2)
 - [ ] Thumbnail for every part
 - [ ] Gamepad navigation check
-- [x] Three saved looks (My look 1-3)
+- [ ] Several saved presets (an Outfit and Save row was tried in v0.3.0 and removed: it did nothing useful)
 - [ ] Re-check against the 27 Oct 2026 release build
 
 See the [open issues](https://github.com/NunoD87/NomadDrive-Wardrobe/issues) for a full list of proposed features (and known issues).
