@@ -24,7 +24,7 @@ namespace NomadDriveWardrobe
     {
         public const string Guid = "com.nunod87.nomaddrive.wardrobe";
         public const string Name = "Nomad Drive Wardrobe";
-        public const string Version = "0.2.1";
+        public const string Version = "0.3.0";
 
         internal static ManualLogSource Log;
         internal static Plugin Instance;
@@ -32,6 +32,8 @@ namespace NomadDriveWardrobe
         private static ConfigEntry<bool> _enabled;
         private static ConfigEntry<bool> _autoApply;
         private static ConfigEntry<string> _buttonPlacement;
+        internal const int SlotCount = 3;
+        private static readonly ConfigEntry<string>[] _slots = new ConfigEntry<string>[SlotCount];
         private static ConfigEntry<bool> _saved;
         private static ConfigEntry<string> _feet, _lower, _upper, _head, _accessories;
 
@@ -61,9 +63,11 @@ namespace NomadDriveWardrobe
             _enabled = Config.Bind("General", "Enabled", true, "Turn the mod on or off without uninstalling it.");
             _autoApply = Config.Bind("General", "AutoApply", true,
                 "Re-apply your saved look automatically when you join a game.");
-            _buttonPlacement = Config.Bind("General", "ButtonPlacement", "Bottom",
-                new ConfigDescription("Where the Wardrobe button goes in the pause menu: Bottom (below the last button) or Side (right of Settings).",
-                    new AcceptableValueList<string>("Bottom", "Side")));
+            _buttonPlacement = Config.Bind("General", "ButtonPlacement", "Inline",
+                new ConfigDescription("Where the Wardrobe button goes in the pause menu: Inline (a new entry right below Settings; the list makes room) or Side (to the right of Settings).",
+                    new AcceptableValueList<string>("Inline", "Side")));
+            for (int i = 0; i < SlotCount; i++)
+                _slots[i] = Config.Bind("My looks", "Slot" + (i + 1), "", "Saved look (written by the Wardrobe, no need to edit).");
             _saved = Config.Bind("Saved look", "HasSavedLook", false,
                 "Set by the mod when you pick something in the Wardrobe. Set to false to go back to the game's default outfit.");
             _feet = Config.Bind("Saved look", "Feet", "", "Cosmetic id (written by the Wardrobe).");
@@ -126,23 +130,45 @@ namespace NomadDriveWardrobe
                 var settings = AccessTools.Field(__instance.GetType(), "settingsButton")?.GetValue(__instance) as Component;
                 if (panel == null || settings == null) { Log.LogWarning("settingsButton not found on the pause menu."); return; }
 
-                var parent = settings.transform.parent;
-                if (parent.Find("WardrobeButton") != null) return;
+                var btnType = AccessTools.TypeByName("UnityEngine.UI.Button");
+                var layoutType = AccessTools.TypeByName("UnityEngine.UI.LayoutGroup");
 
-                var clone = UnityEngine.Object.Instantiate(settings.gameObject, parent);
-                clone.name = "WardrobeButton";
-                clone.SetActive(false); // shown once PlaceButton has found its spot
-
-                // Localization components would overwrite our label; strip them on the copy only.
-                foreach (var c in clone.GetComponentsInChildren<Component>(true))
+                // Walk up from the Settings button to the entry that sits directly in the menu's list.
+                Transform item = settings.transform;
+                Transform list = null;
+                var chain = new System.Text.StringBuilder("Pause menu structure:");
+                for (int i = 0; i < 5 && item != null; i++)
                 {
-                    if (c == null) continue;
-                    var n = c.GetType().Name;
-                    if (n.IndexOf("Locali", StringComparison.OrdinalIgnoreCase) >= 0) UnityEngine.Object.Destroy(c);
+                    var par = item.parent;
+                    bool isList = par != null && layoutType != null && par.GetComponent(layoutType) != null;
+                    chain.Append(' ').Append(item.name).Append('[').Append(item.childCount).Append("] <");
+                    if (isList) { list = par; chain.Append(' ').Append(par.name).Append('[').Append(par.childCount).Append(", layout]"); break; }
+                    item = par;
+                }
+                Log.LogInfo(chain.ToString());
+
+                int buttons = btnType != null && item != null ? item.GetComponentsInChildren(btnType, true).Length : 99;
+                if (list != null && buttons <= 1)
+                {
+                    if (list.Find("WardrobeButton") != null) return;
+                    var entry = UnityEngine.Object.Instantiate(item.gameObject, list);
+                    entry.name = "WardrobeButton";
+                    entry.transform.SetSiblingIndex(item.GetSiblingIndex() + 1);
+                    PrepareClone(entry, panel);
+
+                    if (string.Equals(_buttonPlacement.Value, "Side", StringComparison.OrdinalIgnoreCase))
+                        Instance.StartCoroutine(PlaceSide(item, entry));
+                    Log.LogInfo("Wardrobe entry added to the pause menu list (" + _buttonPlacement.Value + ").");
+                    return;
                 }
 
-                Instance.StartCoroutine(ConfigureButton(clone, "Wardrobe", () => Instance.Toggle(panel.gameObject, panel)));
-                Instance.StartCoroutine(PlaceButton(settings, clone));
+                Log.LogWarning("Could not find the pause menu list (button count in entry: " + buttons + "); using a plain copy next to Settings.");
+                var parent = settings.transform.parent;
+                if (parent.Find("WardrobeButton") != null) return;
+                var clone = UnityEngine.Object.Instantiate(settings.gameObject, parent);
+                clone.name = "WardrobeButton";
+                PrepareClone(clone, panel);
+                Instance.StartCoroutine(PlaceSide(settings.transform, clone));
             }
             catch (Exception e)
             {
@@ -150,68 +176,42 @@ namespace NomadDriveWardrobe
             }
         }
 
-        // The pause menu keeps a remembered position for each of its own buttons (they slide in), so a button
-        // inserted between them lands on top of one. Put ours outside that layout: below the last button, or to
-        // the side of Settings. It ignores the layout group and is placed by hand once the menu has settled.
-        private static IEnumerator PlaceButton(Component settings, GameObject clone)
+        private static void PrepareClone(GameObject clone, Component panel)
+        {
+            // Localization components would overwrite our label; strip them on the copy only.
+            foreach (var c in clone.GetComponentsInChildren<Component>(true))
+            {
+                if (c == null) continue;
+                if (c.GetType().Name.IndexOf("Locali", StringComparison.OrdinalIgnoreCase) >= 0) UnityEngine.Object.Destroy(c);
+            }
+            Instance.StartCoroutine(ConfigureButton(clone, "Wardrobe", () => Instance.Toggle(panel.gameObject, panel)));
+        }
+
+        // Side placement: leave the list's layout and sit to the right of the Settings entry.
+        private static IEnumerator PlaceSide(Transform reference, GameObject clone)
         {
             yield return new WaitForSecondsRealtime(0.8f);
-            if (clone == null || settings == null) yield break;
-
+            if (clone == null || reference == null) yield break;
             try
             {
-                var sRect = (RectTransform)settings.transform;
-                var cRect = (RectTransform)clone.transform;
-                var parent = (RectTransform)sRect.parent;
-
                 var le = AccessTools.TypeByName("UnityEngine.UI.LayoutElement");
                 if (le != null)
                 {
                     var comp = clone.GetComponent(le) ?? clone.AddComponent(le);
                     AccessTools.Property(le, "ignoreLayout")?.SetValue(comp, true, null);
                 }
-                var rebuilder = AccessTools.TypeByName("UnityEngine.UI.LayoutRebuilder");
-                AccessTools.Method(rebuilder, "ForceRebuildLayoutImmediate")?.Invoke(null, new object[] { parent });
-
-                var buttons = new List<RectTransform>();
-                foreach (Transform t in parent)
-                {
-                    var r = t as RectTransform;
-                    if (r != null && r != cRect && r.gameObject.activeSelf) buttons.Add(r);
-                }
-                buttons = buttons.OrderByDescending(r => r.anchoredPosition.y).ToList();
-                var sb = new System.Text.StringBuilder("Pause menu buttons:");
-                foreach (var r in buttons) sb.Append(' ').Append(r.name).Append('@').Append(Mathf.RoundToInt(r.anchoredPosition.y));
-                Log.LogInfo(sb.ToString());
-
-                cRect.anchorMin = sRect.anchorMin;
-                cRect.anchorMax = sRect.anchorMax;
-                cRect.pivot = sRect.pivot;
-                cRect.sizeDelta = sRect.sizeDelta;
-
-                bool side = string.Equals(_buttonPlacement.Value, "Side", StringComparison.OrdinalIgnoreCase);
-                if (side || buttons.Count == 0)
-                {
-                    float w = sRect.rect.width > 20f ? sRect.rect.width : 360f;
-                    cRect.anchoredPosition = sRect.anchoredPosition + new Vector2(w + 24f, 0f);
-                }
-                else
-                {
-                    var last = buttons[buttons.Count - 1];
-                    float pitch = buttons.Count > 1
-                        ? buttons[buttons.Count - 2].anchoredPosition.y - last.anchoredPosition.y
-                        : last.rect.height + 10f;
-                    if (pitch < 10f) pitch = last.rect.height + 10f;
-                    cRect.anchoredPosition = new Vector2(last.anchoredPosition.x, last.anchoredPosition.y - pitch);
-                }
-
-                clone.transform.SetAsLastSibling();
-                clone.SetActive(true);
+                var rRect = (RectTransform)reference;
+                var cRect = (RectTransform)clone.transform;
+                cRect.anchorMin = rRect.anchorMin;
+                cRect.anchorMax = rRect.anchorMax;
+                cRect.pivot = rRect.pivot;
+                cRect.sizeDelta = rRect.sizeDelta;
+                float w = rRect.rect.width > 20f ? rRect.rect.width : 360f;
+                cRect.anchoredPosition = rRect.anchoredPosition + new Vector2(w + 24f, 0f);
             }
             catch (Exception e)
             {
-                Log.LogError("PlaceButton: " + e);
-                if (clone != null) clone.SetActive(true);
+                Log.LogError("PlaceSide: " + e);
             }
         }
 
@@ -227,7 +227,7 @@ namespace NomadDriveWardrobe
                 if (text != null) AccessTools.Property(tmp, "text")?.SetValue(text, label, null);
 
                 var btnType = AccessTools.TypeByName("UnityEngine.UI.Button");
-                var btn = btnType != null ? clone.GetComponent(btnType) : null;
+                var btn = btnType != null ? clone.GetComponentInChildren(btnType, true) : null;
                 var ev = btn != null ? AccessTools.Property(btnType, "onClick")?.GetValue(btn, null) as UnityEvent : null;
                 if (ev == null) { Log.LogWarning("Could not wire the button '" + label + "' (Button.onClick not found)."); yield break; }
 
@@ -328,6 +328,24 @@ namespace NomadDriveWardrobe
                 Accessories = _accessories.Value.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
                     .Select(s => s.Trim()).Where(s => s.Length > 0).ToList(),
             };
+        }
+
+        internal static Cosmetics.Look GetSlot(int i)
+        {
+            var v = _slots[i].Value;
+            if (string.IsNullOrEmpty(v)) return null;
+            var parts = v.Split('|');
+            if (parts.Length != 5) return null;
+            return new Cosmetics.Look
+            {
+                Feet = parts[0], LowerBody = parts[1], UpperBody = parts[2], Head = parts[3],
+                Accessories = parts[4].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToList(),
+            };
+        }
+
+        internal static void SetSlot(int i, Cosmetics.Look l)
+        {
+            _slots[i].Value = string.Join("|", new[] { l.Feet, l.LowerBody, l.UpperBody, l.Head, string.Join(",", l.Accessories.ToArray()) });
         }
 
         internal static void SaveLook(Component mgr)

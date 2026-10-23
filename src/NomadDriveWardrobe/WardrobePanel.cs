@@ -25,6 +25,7 @@ namespace NomadDriveWardrobe
 
         private readonly List<Row> _rows = new List<Row>();
         private Row _outfitRow;
+        private Row _saveRow;
         private readonly Dictionary<string, Row> _partRows = new Dictionary<string, Row>();
         private readonly Dictionary<string, Row> _accRows = new Dictionary<string, Row>();
         private Dictionary<string, List<string>> _partIds = new Dictionary<string, List<string>>();
@@ -110,7 +111,7 @@ namespace NomadDriveWardrobe
 
             // Layout numbers
             const float margin = 28f, gap = 8f, previewW = 440f, titleH = 128f, footerH = 110f;
-            int leftRows = 1 + Cosmetics.Parts.Length;
+            int leftRows = 2 + Cosmetics.Parts.Length;
             int accCount = _partIds[Cosmetics.AccessoryCategory].Count;
             int maxRows = Math.Max(leftRows, accCount);
             float cols = accCount > 0 ? 2f : 1f;
@@ -143,13 +144,12 @@ namespace NomadDriveWardrobe
 
             // Left column: outfit + parts
             float x = margin, y = -titleH;
-            if (_sets.Count > 0)
-            {
-                var names = new List<string> { "Custom" };
-                names.AddRange(_sets.Select(s => Names.Outfit(s.Name)));
-                _outfitRow = AddRow(template, window.transform, "Outfit", names, 0, x, y, rowW, rowH, OnOutfit);
-                y -= rowH + gap;
-            }
+            _outfitRow = AddRow(template, window.transform, "Outfit", OutfitNames(), 0, x, y, rowW, rowH, OnOutfit);
+            y -= rowH + gap;
+            var slotChoices = new List<string> { "Choose a slot" };
+            for (int i = 0; i < Plugin.SlotCount; i++) slotChoices.Add("My look " + (i + 1));
+            _saveRow = AddRow(template, window.transform, "Save current look", slotChoices, 0, x, y, rowW, rowH, OnSaveSlot);
+            y -= rowH + gap;
 
             foreach (var part in Cosmetics.Parts)
             {
@@ -245,16 +245,35 @@ namespace NomadDriveWardrobe
             finally { _updating = false; }
         }
 
+        // Index among the presets followed by "My look" slots, or -1 when the current mix matches none.
         private int MatchingOutfit()
         {
             var look = Cosmetics.Capture(_mgr);
             for (int i = 0; i < _sets.Count; i++)
             {
                 var s = _sets[i];
-                if (s.Feet == look.Feet && s.LowerBody == look.LowerBody && s.UpperBody == look.UpperBody &&
-                    s.Head == look.Head && SameSet(s.Accessories, look.Accessories)) return i;
+                if (Same(s.Feet, s.LowerBody, s.UpperBody, s.Head, s.Accessories, look)) return i;
+            }
+            for (int i = 0; i < Plugin.SlotCount; i++)
+            {
+                var l = Plugin.GetSlot(i);
+                if (l != null && Same(l.Feet, l.LowerBody, l.UpperBody, l.Head, l.Accessories, look)) return _sets.Count + i;
             }
             return -1;
+        }
+
+        private static bool Same(string feet, string lower, string upper, string head, List<string> acc, Cosmetics.Look look)
+        {
+            return feet == look.Feet && lower == look.LowerBody && upper == look.UpperBody && head == look.Head && SameSet(acc, look.Accessories);
+        }
+
+        private List<string> OutfitNames()
+        {
+            var names = new List<string> { "Custom" };
+            names.AddRange(_sets.Select(s => Names.Outfit(s.Name)));
+            for (int i = 0; i < Plugin.SlotCount; i++)
+                names.Add("My look " + (i + 1) + (Plugin.GetSlot(i) == null ? " (empty)" : ""));
+            return names;
         }
 
         private static bool SameSet(List<string> a, List<string> b)
@@ -262,16 +281,41 @@ namespace NomadDriveWardrobe
             return a.Count == b.Count && a.All(b.Contains);
         }
 
+        // "Custom" only means the current mix is not one of the presets; it is not something to pick.
         private void OnOutfit(int index)
         {
             if (_updating || index <= 0) return;
-            var s = _sets[index - 1];
-            Cosmetics.ApplyLook(_mgr, new Cosmetics.Look
+
+            Cosmetics.Look look;
+            if (index - 1 < _sets.Count)
             {
-                Feet = s.Feet, LowerBody = s.LowerBody, UpperBody = s.UpperBody, Head = s.Head, Accessories = s.Accessories,
-            });
+                var s = _sets[index - 1];
+                look = new Cosmetics.Look { Feet = s.Feet, LowerBody = s.LowerBody, UpperBody = s.UpperBody, Head = s.Head, Accessories = s.Accessories };
+            }
+            else
+            {
+                look = Plugin.GetSlot(index - 1 - _sets.Count);
+                if (look == null) { RefreshFromCharacter(); return; } // empty slot: nothing to apply
+            }
+
+            Cosmetics.ApplyLook(_mgr, look);
             Plugin.SaveLook(_mgr);
             Plugin.Instance.StartCoroutine(AfterChange());
+        }
+
+        private void OnSaveSlot(int index)
+        {
+            if (_updating || index <= 0) return;
+            Plugin.SetSlot(index - 1, Cosmetics.Capture(_mgr));
+            _updating = true;
+            try
+            {
+                ApplyOptions(_outfitRow.Selector, OutfitNames());
+                SetIndex(_saveRow, 0);
+                SetIndex(_outfitRow, MatchingOutfit() + 1);
+            }
+            finally { _updating = false; }
+            Plugin.Log.LogInfo("Saved the current look to My look " + index + ".");
         }
 
         private void OnPart(string part, int index)
@@ -396,18 +440,8 @@ namespace NomadDriveWardrobe
             SetLabel(go, sel, label);
             Plugin.Instance.StartCoroutine(RelabelNextFrame(go, sel, label));
 
-            var setOptions = AccessTools.Method(_selType, "SetOptions");
-            if (setOptions != null)
-            {
-                var ps = setOptions.GetParameters();
-                object arg = options;
-                if (ps.Length > 0 && ps[0].ParameterType.IsArray) arg = options.ToArray();
-                var args = new object[ps.Length];
-                args[0] = arg;
-                for (int i = 1; i < ps.Length; i++)
-                    args[i] = ps[i].HasDefaultValue ? ps[i].DefaultValue : (ps[i].ParameterType.IsValueType ? Activator.CreateInstance(ps[i].ParameterType) : null);
-                setOptions.Invoke(sel, args);
-            }
+            ClearTemplateDots(sel);
+            ApplyOptions(sel, options);
             AccessTools.Method(_selType, "SetValueWithoutNotify")?.Invoke(sel, new object[] { index });
 
             var ev = _selType.GetEvent("OnValueChanged");
@@ -417,6 +451,30 @@ namespace NomadDriveWardrobe
             var row = new Row { Selector = (Component)sel, Go = go };
             _rows.Add(row);
             return row;
+        }
+
+        // The copy carries the template's dot objects, which the selector does not track and never removes,
+        // so they show as extra squares that do nothing. Remove them before the selector builds its own.
+        private void ClearTemplateDots(object sel)
+        {
+            var v = AccessTools.Field(_selType, "dotContainer")?.GetValue(sel);
+            var t = v as Transform ?? (v as Component)?.transform ?? (v as GameObject)?.transform;
+            if (t == null) return;
+            for (int i = t.childCount - 1; i >= 0; i--) UnityEngine.Object.DestroyImmediate(t.GetChild(i).gameObject);
+        }
+
+        private void ApplyOptions(object sel, List<string> options)
+        {
+            var setOptions = AccessTools.Method(_selType, "SetOptions");
+            if (setOptions == null) return;
+            var ps = setOptions.GetParameters();
+            object arg = options;
+            if (ps.Length > 0 && ps[0].ParameterType.IsArray) arg = options.ToArray();
+            var args = new object[ps.Length];
+            args[0] = arg;
+            for (int i = 1; i < ps.Length; i++)
+                args[i] = ps[i].HasDefaultValue ? ps[i].DefaultValue : (ps[i].ParameterType.IsValueType ? Activator.CreateInstance(ps[i].ParameterType) : null);
+            setOptions.Invoke(sel, args);
         }
 
         private void SetLabel(GameObject go, object sel, string label)

@@ -173,6 +173,17 @@ namespace NomadDriveWardrobe
             Ok = false;
         }
 
+        // HDAdditionalCameraData exposes these as fields in some versions and properties in others.
+        private static void SetMember(Type t, object target, string name, object value)
+        {
+            var f = t.GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            var p = t.GetProperty(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            var type = f != null ? f.FieldType : p != null ? p.PropertyType : null;
+            if (type == null) { Plugin.Log.LogInfo("Preview: HDRP member '" + name + "' not found."); return; }
+            if (value == null && type.IsEnum) value = Enum.Parse(type, "Color");
+            if (f != null) f.SetValue(target, value); else p.SetValue(target, value, null);
+        }
+
         // HDRP cameras need extra data to draw on a plain colour instead of the sky.
         private static void ConfigureHdrp(GameObject camGo)
         {
@@ -182,11 +193,8 @@ namespace NomadDriveWardrobe
                 if (t == null) return;
                 var data = camGo.GetComponent(t) ?? camGo.AddComponent(t);
 
-                var modeProp = AccessTools.Property(t, "clearColorMode");
-                if (modeProp != null)
-                    modeProp.SetValue(data, Enum.Parse(modeProp.PropertyType, "Color"), null);
-                var bg = AccessTools.Property(t, "backgroundColorHDR");
-                bg?.SetValue(data, new Color(0.10f, 0.11f, 0.12f, 1f), null);
+                SetMember(t, data, "clearColorMode", null);
+                SetMember(t, data, "backgroundColorHDR", new Color(0.10f, 0.11f, 0.12f, 1f));
             }
             catch (Exception e)
             {
