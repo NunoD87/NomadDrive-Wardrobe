@@ -19,7 +19,11 @@ namespace NomadDriveWardrobe
         private Camera _cam;
         private RenderTexture _rt;
         private Transform _modelRoot;
-        private float _yaw = 200f;
+        private float _yaw;          // 0 = the character seen from the front
+        private float _pitch = 6f;
+        private float _zoom = 1f;
+        private Vector3 _center;
+        private float _height = 1.8f;
 
         private class Saved { public Renderer R; public int Layer; public bool Enabled; public UnityEngine.Rendering.ShadowCastingMode Shadow; }
         private readonly List<Saved> _saved = new List<Saved>();
@@ -53,6 +57,7 @@ namespace NomadDriveWardrobe
                 ConfigureHdrp(go);
 
                 IsolateCharacter();
+                Reframe();
                 Ok = _saved.Count > 0;
                 if (!Ok) Plugin.Log.LogWarning("Preview: no character renderers found.");
                 else Plugin.Log.LogInfo("Preview: " + _saved.Count + " renderers, camera ready.");
@@ -93,6 +98,7 @@ namespace NomadDriveWardrobe
                 _saved.Add(new Saved { R = r, Layer = r.gameObject.layer, Enabled = r.enabled, Shadow = r.shadowCastingMode });
             }
             Apply();
+            Reframe();
         }
 
         private void Apply()
@@ -106,28 +112,47 @@ namespace NomadDriveWardrobe
             }
         }
 
-        /// <summary>Turntable: call every frame while the panel is open.</summary>
+        // Where the character is and how big: measured once, not every frame, so the view stays steady.
+        private void Reframe()
+        {
+            Bounds b = default(Bounds);
+            bool any = false;
+            foreach (var sv in _saved)
+            {
+                if (sv.R == null || !sv.R.gameObject.activeInHierarchy) continue;
+                if (!any) { b = sv.R.bounds; any = true; } else b.Encapsulate(sv.R.bounds);
+            }
+            if (!any) return;
+            _center = b.center;
+            _height = Mathf.Max(0.5f, b.size.y);
+        }
+
+        internal void Orbit(float dx, float dy)
+        {
+            _yaw -= dx * 0.4f;
+            _pitch = Mathf.Clamp(_pitch + dy * 0.3f, -35f, 70f);
+        }
+
+        internal void Zoom(float amount)
+        {
+            _zoom = Mathf.Clamp(_zoom - amount * 0.12f, 0.35f, 1.8f);
+        }
+
+        internal void ResetView()
+        {
+            _yaw = 0f; _pitch = 6f; _zoom = 1f;
+        }
+
+        /// <summary>Keeps the camera on the character. Call every frame while the panel is open.</summary>
         internal void Tick(float unscaledDt)
         {
             if (!Ok || _cam == null || _modelRoot == null) return;
-            _yaw += 24f * unscaledDt;
 
-            // Frame the visible renderers.
-            Bounds b = default(Bounds);
-            bool any = false;
-            foreach (var s in _saved)
-            {
-                if (s.R == null || !s.R.gameObject.activeInHierarchy) continue;
-                if (!any) { b = s.R.bounds; any = true; } else b.Encapsulate(s.R.bounds);
-            }
-            if (!any) return;
-
-            float height = Mathf.Max(0.5f, b.size.y);
-            float dist = (height * 0.5f) / Mathf.Tan(_cam.fieldOfView * 0.5f * Mathf.Deg2Rad) * 1.25f;
-            var center = b.center;
-            var dir = Quaternion.Euler(0f, _modelRoot.eulerAngles.y + _yaw, 0f) * Vector3.forward;
-            _cam.transform.position = center + dir * dist + Vector3.up * (height * 0.05f);
-            _cam.transform.LookAt(center);
+            float dist = (_height * 0.5f) / Mathf.Tan(_cam.fieldOfView * 0.5f * Mathf.Deg2Rad) * 1.25f * _zoom;
+            var front = Quaternion.Euler(0f, _modelRoot.eulerAngles.y + _yaw, 0f);
+            var offset = front * (Quaternion.Euler(-_pitch, 0f, 0f) * Vector3.forward) * dist;
+            _cam.transform.position = _center + offset;
+            _cam.transform.LookAt(_center);
         }
 
         internal void Close()

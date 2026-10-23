@@ -51,8 +51,8 @@
 
 In Nomad Drive your character comes from a round-robin by join order: the first player to spawn gets outfit 1, the next outfit 2, and so on. There is no way to change it. This mod adds one.
 
-* A **Wardrobe** button in the pause menu (below Settings) opens an outfit picker built from the game's own UI.
-* A **live preview** of your character turns beside the list, so you see what you pick.
+* A **Wardrobe** button in the pause menu (below the last button, or to the side of Settings with `ButtonPlacement = Side`) opens an outfit picker built from the game's own UI.
+* A **live preview** of your character beside the list, so you see what you pick. Drag to turn the camera, scroll to zoom.
 * Pick a whole **outfit**, or **mix and match** feet, legs, torso, head and accessories, with readable names ("Cowboy Hat", "Tank Top", ...).
 * Your choice is **saved** and re-applied every time you join a game.
 * **Everyone sees your look, and only you need the mod.** The mod uses the game's own networked cosmetic commands, so the server checks and syncs the choice like any normal change.
@@ -92,8 +92,8 @@ In Nomad Drive your character comes from a round-robin by join order: the first 
 ## Usage
 
 1. Join or start a game, press **Esc** to open the pause menu.
-2. Click **Wardrobe** (below Settings).
-3. Choose an **Outfit**, or use the `<` `>` arrows for each part and switch accessories **On/Off**. The character on the right shows the result.
+2. Click **Wardrobe** (at the bottom of the menu, or beside Settings).
+3. Choose an **Outfit**, or use the `<` `>` arrows for each part and switch accessories **On/Off**. The character on the right shows the result: drag on it to turn the camera, scroll to zoom.
 4. Click **Close**. Your look is saved and used next time automatically.
 
 To go back to the game's default outfit, set `HasSavedLook` to `false` in the config. If the native panel cannot be built (for example after a game update), the mod falls back to a simple on-screen window.
@@ -105,6 +105,7 @@ The first time you open a game with the mod, the log (`BepInEx/LogOutput.log`, o
 | Key | Default | Meaning |
 |---|---|---|
 | `Enabled` | `true` | Switch the mod off without uninstalling |
+| `ButtonPlacement` | `Bottom` | Pause menu button: `Bottom` (below the last button) or `Side` (right of Settings) |
 | `AutoApply` | `true` | Re-apply the saved look when joining a game |
 | `HasSavedLook` | `false` | Set by the mod when you pick something; set to `false` to use the game's outfit again |
 | `Feet`, `LowerBody`, `UpperBody`, `Head`, `Accessories` | empty | Your saved parts. Written by the Wardrobe, no need to edit |
@@ -118,7 +119,7 @@ Found by reading the game's assemblies:
 * `PlayerCosmeticManager` sits on every player. On the server it picks `availableSets[counter++ % count]` for each new player, which is why outfits depend on join order.
 * Each part (`Feet`, `LowerBody`, `UpperBody`, `Head`, up to 16 accessories) is a separate synced value. Every client shows the right parts from those values, including for players who join later.
 * The game already has `SetCosmetic`, `AddAccessory`, `RemoveAccessory` and `ApplySet`, which send commands to the server. The server validates the id against the character's real parts. Nothing in the game calls them, so there is no menu. This mod is that menu.
-* The pause menu button is a copy of the Settings button; the lower buttons move down to make room. The panel's rows are copies of the Settings screen's own option selectors, so they look and sound like the rest of the game.
+* The pause menu button is a copy of the Settings button, placed outside the menu's own layout (the game keeps a remembered position for each of its buttons, so squeezing one in between puts it on top of another). The panel's rows are copies of the Settings screen's own option selectors, so they look and sound like the rest of the game.
 * The preview is a hidden camera that draws only your character into a texture. While the panel is open the character is moved to an unused layer (and unhidden if first-person hides it); everything is restored when you close it.
 
 Game types are reached through reflection, so this repository contains no game files.

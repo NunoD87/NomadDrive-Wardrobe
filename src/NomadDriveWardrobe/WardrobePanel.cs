@@ -30,6 +30,10 @@ namespace NomadDriveWardrobe
         private Dictionary<string, List<string>> _partIds = new Dictionary<string, List<string>>();
         private List<Cosmetics.OutfitSet> _sets;
         private bool _updating;
+        private RectTransform _previewRect;
+        private Canvas _canvas;
+        private bool _dragging;
+        private string _templateLabel = "";
 
         private class Row { public Component Selector; public GameObject Go; }
 
@@ -76,6 +80,7 @@ namespace NomadDriveWardrobe
             float rowW = Mathf.Max(360f, templateRect.rect.width > 10 ? templateRect.rect.width : templateRect.sizeDelta.x);
             float rowH = Mathf.Max(44f, templateRect.rect.height > 10 ? templateRect.rect.height : templateRect.sizeDelta.y);
             var labelTemplate = AccessTools.Property(_selType, "LabelText")?.GetValue(template, null) as Component;
+            _templateLabel = labelTemplate != null ? (AccessTools.Property(labelTemplate.GetType(), "text")?.GetValue(labelTemplate, null) as string ?? "") : "";
 
             // Data
             _sets = Cosmetics.Sets(mgr);
@@ -90,6 +95,7 @@ namespace NomadDriveWardrobe
 
             // Root: dim background + window
             var canvas = pauseRoot.GetComponentInParent<Canvas>();
+            _canvas = canvas;
             if (canvas == null) { Plugin.Log.LogWarning("Wardrobe panel: no canvas."); return false; }
             var canvasTf = canvas.rootCanvas.transform;
 
@@ -103,7 +109,7 @@ namespace NomadDriveWardrobe
             Stretch((RectTransform)dim.transform);
 
             // Layout numbers
-            const float margin = 28f, gap = 8f, previewW = 440f, titleH = 90f, footerH = 96f;
+            const float margin = 28f, gap = 8f, previewW = 440f, titleH = 128f, footerH = 110f;
             int leftRows = 1 + Cosmetics.Parts.Length;
             int accCount = _partIds[Cosmetics.AccessoryCategory].Count;
             int maxRows = Math.Max(leftRows, accCount);
@@ -123,6 +129,17 @@ namespace NomadDriveWardrobe
             // Title
             var title = NewText("Title", window.transform, tmpType, labelTemplate, "Wardrobe", 40f, "Left");
             Place((RectTransform)title.transform, margin, -22f, winW - 2 * margin, 56f);
+
+            // Column headers
+            var h1 = NewText("HeaderBody", window.transform, tmpType, labelTemplate, "Outfit and parts", 26f, "Left");
+            Place((RectTransform)h1.transform, margin, -titleH + 34f, rowW, 34f);
+            if (accCount > 0)
+            {
+                var h2 = NewText("HeaderAcc", window.transform, tmpType, labelTemplate, "Accessories", 26f, "Left");
+                Place((RectTransform)h2.transform, margin + rowW + margin, -titleH + 34f, rowW, 34f);
+            }
+            var h3 = NewText("HeaderPreview", window.transform, tmpType, labelTemplate, "Preview  (drag to turn, scroll to zoom)", 26f, "Left");
+            Place((RectTransform)h3.transform, winW - margin - previewW, -titleH + 34f, previewW, 34f);
 
             // Left column: outfit + parts
             float x = margin, y = -titleH;
@@ -167,6 +184,7 @@ namespace NomadDriveWardrobe
             Place((RectTransform)frame.transform, px, -titleH, previewW, winH - titleH - footerH);
             _rawImage = NewComponentOn("Preview", frame.transform, rawType);
             var rawRect = ((Component)_rawImage).GetComponent<RectTransform>();
+            _previewRect = rawRect;
             Stretch(rawRect);
             rawRect.offsetMin = new Vector2(4f, 4f);
             rawRect.offsetMax = new Vector2(-4f, -4f);
@@ -188,9 +206,13 @@ namespace NomadDriveWardrobe
             {
                 var btn = UnityEngine.Object.Instantiate(settingsBtn.gameObject, window.transform);
                 btn.name = "WardrobeClose";
+                var sr = (RectTransform)settingsBtn.transform;
+                float bw = sr.rect.width > 40f ? sr.rect.width : 360f;
+                float bh = sr.rect.height > 30f ? sr.rect.height : 72f;
                 var br = (RectTransform)btn.transform;
                 br.anchorMin = br.anchorMax = br.pivot = new Vector2(0.5f, 0f);
-                br.anchoredPosition = new Vector2(0f, 24f);
+                br.sizeDelta = new Vector2(bw, bh);
+                br.anchoredPosition = new Vector2(0f, 20f);
                 Plugin.Instance.StartCoroutine(Plugin.ConfigureButton(btn, "Close", () => Plugin.Instance.CloseWardrobe()));
             }
 
@@ -281,7 +303,49 @@ namespace NomadDriveWardrobe
 
         internal void Tick(float unscaledDt)
         {
-            _preview?.Tick(unscaledDt);
+            if (_preview == null) return;
+            HandleMouse();
+            _preview.Tick(unscaledDt);
+        }
+
+        // Drag on the preview turns the camera; the wheel zooms. Read from the game's Input System by reflection.
+        private static Type _mouseType;
+        private void HandleMouse()
+        {
+            if (!_preview.Ok || _previewRect == null) return;
+            if (_mouseType == null) _mouseType = AccessTools.TypeByName("UnityEngine.InputSystem.Mouse");
+            var mouse = _mouseType != null ? AccessTools.Property(_mouseType, "current")?.GetValue(null, null) : null;
+            if (mouse == null) return;
+
+            Vector2 pos = ReadVec2(mouse, "position"), delta = ReadVec2(mouse, "delta"), scroll = ReadVec2(mouse, "scroll");
+            var left = AccessTools.Property(_mouseType, "leftButton")?.GetValue(mouse, null);
+            bool pressed = left != null && (bool)(AccessTools.Property(left.GetType(), "isPressed")?.GetValue(left, null) ?? false);
+
+            var cam = _canvas != null && _canvas.renderMode != RenderMode.ScreenSpaceOverlay ? _canvas.worldCamera : null;
+            var c = new Vector3[4];
+            _previewRect.GetWorldCorners(c);
+            Vector2 min = RectTransformUtility.WorldToScreenPoint(cam, c[0]);
+            Vector2 max = RectTransformUtility.WorldToScreenPoint(cam, c[2]);
+            bool inside = pos.x >= min.x && pos.x <= max.x && pos.y >= min.y && pos.y <= max.y;
+
+            if (!pressed) _dragging = false;
+            else if (inside && !_dragging && delta == Vector2.zero) _dragging = true;
+            else if (inside && !_dragging) _dragging = true;
+
+            if (_dragging && pressed) _preview.Orbit(delta.x, delta.y);
+            if (inside && Mathf.Abs(scroll.y) > 0.01f) _preview.Zoom(Mathf.Sign(scroll.y));
+        }
+
+        private static Vector2 ReadVec2(object mouse, string control)
+        {
+            try
+            {
+                var ctl = AccessTools.Property(_mouseType, control)?.GetValue(mouse, null);
+                if (ctl == null) return Vector2.zero;
+                var read = ctl.GetType().GetMethod("ReadValue", Type.EmptyTypes);
+                return read != null ? (Vector2)read.Invoke(ctl, null) : Vector2.zero;
+            }
+            catch { return Vector2.zero; }
         }
 
         internal void Close()
@@ -324,8 +388,13 @@ namespace NomadDriveWardrobe
             go.AddComponent<WardrobeMarker>();
 
             var sel = go.GetComponent(_selType);
-            var labelText = AccessTools.Property(_selType, "LabelText")?.GetValue(sel, null);
-            if (labelText != null) AccessTools.Property(labelText.GetType(), "text")?.SetValue(labelText, label, null);
+            foreach (var c in go.GetComponentsInChildren<Component>(true))
+            {
+                if (c == null) continue;
+                if (c.GetType().Name.IndexOf("Locali", StringComparison.OrdinalIgnoreCase) >= 0) UnityEngine.Object.Destroy(c);
+            }
+            SetLabel(go, sel, label);
+            Plugin.Instance.StartCoroutine(RelabelNextFrame(go, sel, label));
 
             var setOptions = AccessTools.Method(_selType, "SetOptions");
             if (setOptions != null)
@@ -348,6 +417,27 @@ namespace NomadDriveWardrobe
             var row = new Row { Selector = (Component)sel, Go = go };
             _rows.Add(row);
             return row;
+        }
+
+        private void SetLabel(GameObject go, object sel, string label)
+        {
+            var labelText = AccessTools.Property(_selType, "LabelText")?.GetValue(sel, null);
+            if (labelText != null) AccessTools.Property(labelText.GetType(), "text")?.SetValue(labelText, label, null);
+        }
+
+        // The game may rewrite the label once it initializes; set it again after a frame, and replace
+        // any text that still shows the template's label ("Upscaler").
+        private IEnumerator RelabelNextFrame(GameObject go, object sel, string label)
+        {
+            yield return null;
+            yield return null;
+            if (go == null) yield break;
+            SetLabel(go, sel, label);
+            var tmp = AccessTools.TypeByName("TMPro.TMP_Text");
+            if (tmp == null || _templateLabel.Length == 0) yield break;
+            var textProp = AccessTools.Property(tmp, "text");
+            foreach (var t in go.GetComponentsInChildren(tmp, true))
+                if ((textProp.GetValue(t, null) as string) == _templateLabel) textProp.SetValue(t, label, null);
         }
 
         private void SetIndex(Row row, int index)

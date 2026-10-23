@@ -24,13 +24,14 @@ namespace NomadDriveWardrobe
     {
         public const string Guid = "com.nunod87.nomaddrive.wardrobe";
         public const string Name = "Nomad Drive Wardrobe";
-        public const string Version = "0.2.0";
+        public const string Version = "0.2.1";
 
         internal static ManualLogSource Log;
         internal static Plugin Instance;
 
         private static ConfigEntry<bool> _enabled;
         private static ConfigEntry<bool> _autoApply;
+        private static ConfigEntry<string> _buttonPlacement;
         private static ConfigEntry<bool> _saved;
         private static ConfigEntry<string> _feet, _lower, _upper, _head, _accessories;
 
@@ -60,6 +61,9 @@ namespace NomadDriveWardrobe
             _enabled = Config.Bind("General", "Enabled", true, "Turn the mod on or off without uninstalling it.");
             _autoApply = Config.Bind("General", "AutoApply", true,
                 "Re-apply your saved look automatically when you join a game.");
+            _buttonPlacement = Config.Bind("General", "ButtonPlacement", "Bottom",
+                new ConfigDescription("Where the Wardrobe button goes in the pause menu: Bottom (below the last button) or Side (right of Settings).",
+                    new AcceptableValueList<string>("Bottom", "Side")));
             _saved = Config.Bind("Saved look", "HasSavedLook", false,
                 "Set by the mod when you pick something in the Wardrobe. Set to false to go back to the game's default outfit.");
             _feet = Config.Bind("Saved look", "Feet", "", "Cosmetic id (written by the Wardrobe).");
@@ -127,7 +131,7 @@ namespace NomadDriveWardrobe
 
                 var clone = UnityEngine.Object.Instantiate(settings.gameObject, parent);
                 clone.name = "WardrobeButton";
-                MakeRoom(settings, clone);
+                clone.SetActive(false); // shown once PlaceButton has found its spot
 
                 // Localization components would overwrite our label; strip them on the copy only.
                 foreach (var c in clone.GetComponentsInChildren<Component>(true))
@@ -138,6 +142,7 @@ namespace NomadDriveWardrobe
                 }
 
                 Instance.StartCoroutine(ConfigureButton(clone, "Wardrobe", () => Instance.Toggle(panel.gameObject, panel)));
+                Instance.StartCoroutine(PlaceButton(settings, clone));
             }
             catch (Exception e)
             {
@@ -145,38 +150,69 @@ namespace NomadDriveWardrobe
             }
         }
 
-        // The pause menu lays its buttons out by hand. Open a gap right below Settings for ours.
-        private static void MakeRoom(Component settings, GameObject clone)
+        // The pause menu keeps a remembered position for each of its own buttons (they slide in), so a button
+        // inserted between them lands on top of one. Put ours outside that layout: below the last button, or to
+        // the side of Settings. It ignores the layout group and is placed by hand once the menu has settled.
+        private static IEnumerator PlaceButton(Component settings, GameObject clone)
         {
-            var sRect = (RectTransform)settings.transform;
-            var cRect = (RectTransform)clone.transform;
-            var parent = sRect.parent;
+            yield return new WaitForSecondsRealtime(0.8f);
+            if (clone == null || settings == null) yield break;
 
-            var layoutType = AccessTools.TypeByName("UnityEngine.UI.LayoutGroup");
-            bool auto = layoutType != null && parent.GetComponent(layoutType) != null;
-            clone.transform.SetSiblingIndex(settings.transform.GetSiblingIndex() + 1);
-
-            var sb = new System.Text.StringBuilder("Pause menu buttons:");
-            foreach (Transform t in parent)
+            try
             {
-                var r = t as RectTransform;
-                if (r != null) sb.Append(' ').Append(r.name).Append('@').Append(Mathf.RoundToInt(r.anchoredPosition.y));
-            }
-            Log.LogInfo(sb + (auto ? " (layout group: automatic)" : ""));
-            if (auto) return;
+                var sRect = (RectTransform)settings.transform;
+                var cRect = (RectTransform)clone.transform;
+                var parent = (RectTransform)sRect.parent;
 
-            float sx = sRect.anchoredPosition.x, sy = sRect.anchoredPosition.y;
-            var below = new List<RectTransform>();
-            foreach (Transform t in parent)
+                var le = AccessTools.TypeByName("UnityEngine.UI.LayoutElement");
+                if (le != null)
+                {
+                    var comp = clone.GetComponent(le) ?? clone.AddComponent(le);
+                    AccessTools.Property(le, "ignoreLayout")?.SetValue(comp, true, null);
+                }
+                var rebuilder = AccessTools.TypeByName("UnityEngine.UI.LayoutRebuilder");
+                AccessTools.Method(rebuilder, "ForceRebuildLayoutImmediate")?.Invoke(null, new object[] { parent });
+
+                var buttons = new List<RectTransform>();
+                foreach (Transform t in parent)
+                {
+                    var r = t as RectTransform;
+                    if (r != null && r != cRect && r.gameObject.activeSelf) buttons.Add(r);
+                }
+                buttons = buttons.OrderByDescending(r => r.anchoredPosition.y).ToList();
+                var sb = new System.Text.StringBuilder("Pause menu buttons:");
+                foreach (var r in buttons) sb.Append(' ').Append(r.name).Append('@').Append(Mathf.RoundToInt(r.anchoredPosition.y));
+                Log.LogInfo(sb.ToString());
+
+                cRect.anchorMin = sRect.anchorMin;
+                cRect.anchorMax = sRect.anchorMax;
+                cRect.pivot = sRect.pivot;
+                cRect.sizeDelta = sRect.sizeDelta;
+
+                bool side = string.Equals(_buttonPlacement.Value, "Side", StringComparison.OrdinalIgnoreCase);
+                if (side || buttons.Count == 0)
+                {
+                    float w = sRect.rect.width > 20f ? sRect.rect.width : 360f;
+                    cRect.anchoredPosition = sRect.anchoredPosition + new Vector2(w + 24f, 0f);
+                }
+                else
+                {
+                    var last = buttons[buttons.Count - 1];
+                    float pitch = buttons.Count > 1
+                        ? buttons[buttons.Count - 2].anchoredPosition.y - last.anchoredPosition.y
+                        : last.rect.height + 10f;
+                    if (pitch < 10f) pitch = last.rect.height + 10f;
+                    cRect.anchoredPosition = new Vector2(last.anchoredPosition.x, last.anchoredPosition.y - pitch);
+                }
+
+                clone.transform.SetAsLastSibling();
+                clone.SetActive(true);
+            }
+            catch (Exception e)
             {
-                var r = t as RectTransform;
-                if (r == null || r == cRect || r == sRect || !r.gameObject.activeSelf) continue;
-                if (r.anchoredPosition.y < sy - 1f && Mathf.Abs(r.anchoredPosition.x - sx) < Mathf.Max(50f, sRect.rect.width)) below.Add(r);
+                Log.LogError("PlaceButton: " + e);
+                if (clone != null) clone.SetActive(true);
             }
-
-            float pitch = below.Count > 0 ? sy - below.Max(r => r.anchoredPosition.y) : sRect.rect.height + 12f;
-            foreach (var r in below) r.anchoredPosition += new Vector2(0f, -pitch);
-            cRect.anchoredPosition = new Vector2(sx, sy - pitch);
         }
 
         internal static IEnumerator ConfigureButton(GameObject clone, string label, Action onClick)
